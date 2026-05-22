@@ -1,0 +1,29 @@
+[
+  {
+    "id": "94a15e6b-47eb-4676-be23-bf12ebad9126",
+    "displayName": "An",
+    "email": "nguyentienan179@gmail.com",
+    "passwordHash": "$2b$10$D8fi3zeMvJpOIxrTSY6Ir.hsyyr177Ip1wQk/j6j/3qPljNXytqXu",
+    "isVerified": true,
+    "createdAt": "2026-05-22T02:19:08.802Z",
+    "verifiedAt": "2026-05-22T02:19:26.825Z"
+  },
+  {
+    "id": "33ab6e02-3c80-488d-8dd6-797676890992",
+    "displayName": "Khoa",
+    "email": "ankhoa39155@gmail.com",
+    "passwordHash": "$2b$10$wQXq/GZTBXCZaTRKQcSB0O26Siai..JnHcrYczEynSyIu3pkXbdJ6",
+    "isVerified": true,
+    "createdAt": "2026-05-22T02:20:15.384Z",
+    "verifiedAt": "2026-05-22T02:20:27.922Z"
+  },
+  {
+    "id": "c175c588-d88c-41bd-bde5-fa64221523ae",
+    "displayName": "Ngáo",
+    "email": "cong39155@gmail.com",
+    "passwordHash": "$2b$10$lsBuEDYzEBVuzrj0sukpUuh7l0o1P4mSB7XzqjcZwzyqOKchzPysS",
+    "isVerified": true,
+    "createdAt": "2026-05-22T03:07:45.410Z",
+    "verifiedAt": "2026-05-22T03:08:04.655Z"
+  }
+]

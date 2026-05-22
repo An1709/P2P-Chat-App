@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-vscode-dark min-h-screen overflow-hidden;
+    font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+  /* VSCode Dark Theme */
+  .bg-vscode-dark {
+    background-color: #1e1e1e;
+  }
+  
+  .bg-vscode-darker {
+    background-color: #252526;
+  }
+  
+  .bg-vscode-card {
+    background-color: #2d2d30;
+  }
+  
+  .bg-vscode-hover {
+    background-color: #3e3e42;
+  }
+  
+  .border-vscode-border {
+    border-color: #454545;
+  }
+  
+  .text-vscode-text {
+    color: #ffffff;
+  }
+  
+  .text-vscode-text-secondary {
+    color: #cccccc;
+  }
+  
+  .text-vscode-text-muted {
+    color: #858585;
+  }
+  
+  /* Warm accent colors */
+  .bg-p2p-orange {
+    background-color: #f6851b;
+  }
+  
+  .bg-p2p-orange-dark {
+    background-color: #e2761b;
+  }
+  
+  .bg-p2p-yellow {
+    background-color: #ffc042;
+  }
+  
+  .text-p2p-orange {
+    color: #f6851b;
+  }
+  
+  /* VSCode Blue */
+  .bg-vscode-accent {
+    background-color: #007acc;
+  }
+  
+  .text-vscode-accent {
+    color: #007acc;
+  }
+
+  /* Chat Interface Styles */
+  
+  /* Server list */
+  .server-icon {
+    @apply w-12 h-12 rounded-xl bg-vscode-card flex items-center justify-center 
+           cursor-pointer transition-all duration-200 hover:rounded-lg hover:bg-vscode-hover
+           border border-transparent hover:border-p2p-orange/30
+           text-vscode-text-secondary font-semibold text-lg;
+  }
+  
+  .server-icon.active {
+    @apply rounded-lg bg-gradient-to-br from-p2p-orange/20 to-vscode-accent/20 
+           border-p2p-orange/50 text-p2p-orange;
+  }
+  
+  /* Channel list */
+  .channel-item {
+    @apply px-3 py-2 mx-2 rounded-lg flex items-center space-x-2 cursor-pointer
+           text-vscode-text-secondary hover:bg-vscode-hover hover:text-vscode-text
+           transition-all duration-150 border border-transparent;
+  }
+  
+  .channel-item.active {
+    @apply bg-gradient-to-r from-p2p-orange/10 to-vscode-accent/10 
+           text-p2p-orange border-p2p-orange/30;
+  }
+  
+  /* Category header */
+  .category-header {
+    @apply text-xs font-bold text-vscode-text-muted uppercase tracking-wider
+           px-3 py-3 flex items-center justify-between cursor-pointer
+           hover:text-vscode-text-secondary transition-colors;
+  }
+  
+  /* Message group */
+  .message-group {
+    @apply px-4 py-2 hover:bg-vscode-card/50 transition-colors duration-100 rounded-lg mx-2;
+  }
+  
+  /* Message bubble */
+  .message-bubble {
+    @apply inline-block px-4 py-2 rounded-xl bg-vscode-card border border-vscode-border;
+  }
+  
+  .message-bubble.encrypted {
+    @apply border-p2p-orange/30 bg-gradient-to-br from-vscode-card to-p2p-orange/5;
+  }
+  
+  /* Input styles */
+  .chat-input {
+    @apply bg-vscode-card text-vscode-text placeholder-vscode-text-muted
+           border border-vscode-border rounded-xl px-4 py-3 
+           focus:outline-none focus:ring-2 focus:ring-p2p-orange/50 focus:border-transparent
+           transition-all w-full;
+  }
+  
+  /* Scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #1e1e1e;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #3e3e42;
+    border-radius: 5px;
+    border: 2px solid #1e1e1e;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #4e4e52;
+  }
+  
+  /* Status indicators */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+  
+  .status-online {
+    @apply bg-green-400 shadow-lg shadow-green-400/50;
+  }
+  
+  .status-encrypted {
+    @apply bg-p2p-orange shadow-lg shadow-p2p-orange/50;
+  }
+  
+  /* Badges */
+  .badge {
+    @apply px-2 py-0.5 rounded-md text-xs font-semibold;
+  }
+  
+  .badge-orange {
+    @apply bg-p2p-orange/20 text-p2p-orange border border-p2p-orange/30;
+  }
+  
+  .badge-blue {
+    @apply bg-vscode-accent/20 text-vscode-accent border border-vscode-accent/30;
+  }
+  
+  /* Buttons */
+  .btn-primary {
+    @apply bg-gradient-to-r from-p2p-orange to-p2p-yellow 
+           hover:from-p2p-orange-dark hover:to-p2p-orange
+           text-vscode-dark font-bold px-4 py-2 rounded-lg
+           transition-all shadow-lg hover:shadow-p2p-orange/30;
+  }
+  
+  .btn-secondary {
+    @apply bg-vscode-card hover:bg-vscode-hover
+           text-vscode-text border border-vscode-border
+           font-semibold px-4 py-2 rounded-lg
+           transition-all;
+  }
+}
