@@ -323,10 +323,23 @@ async function verifyToken(token) {
   return publicUser(user);
 }
 
+async function listUsers() {
+  const users = await readUsers();
+  return users.map(publicUser);
+}
+
+async function getPublicUserById(userId) {
+  const users = await readUsers();
+  const user = users.find((candidate) => candidate.id === userId);
+  return user ? publicUser(user) : null;
+}
+
 module.exports = {
   registerUser,
   loginUser,
   verifyOtp,
   resendOtp,
-  verifyToken
+  verifyToken,
+  listUsers,
+  getPublicUserById
 };

@@ -22,6 +22,10 @@ class WebRTCManager {
     this.onConnectionStateChange = null;
     this.onDataChannelOpen = null;
     this.onError = null;
+    this.onOfflineMessages = null;
+    this.onOfflineMessageStored = null;
+    this.onOfflineMessagesDelivered = null;
+    this.onOfflineMessageError = null;
     
     // ICE servers
     this.iceServers = {
@@ -60,6 +64,10 @@ class WebRTCManager {
             
             // Create peer connections to all existing users
             for (const user of message.users) {
+              if (user.simulated) {
+                console.log('🧪 Simulated churn peer listed:', user.username);
+                continue;
+              }
               await this.createPeerConnection(user.userId, true); // We initiate
             }
             
@@ -70,6 +78,12 @@ class WebRTCManager {
             
           case 'user-joined':
             console.log('👋 User joined:', message.username);
+            if (message.simulated) {
+              if (this.onUserJoined) {
+                this.onUserJoined(message);
+              }
+              break;
+            }
             // New user will initiate connection to us, we just wait
             await this.createPeerConnection(message.userId, false); // They initiate
             
@@ -80,7 +94,9 @@ class WebRTCManager {
             
           case 'user-left':
             console.log('👋 User left:', message.username);
-            this.removePeerConnection(message.userId);
+            if (!message.simulated) {
+              this.removePeerConnection(message.userId);
+            }
             
             if (this.onUserLeft) {
               this.onUserLeft(message);
@@ -109,6 +125,31 @@ class WebRTCManager {
             console.error('❌ Server error:', message.message);
             if (this.onError) {
               this.onError(message.message);
+            }
+            break;
+
+          case 'offline-message:pending':
+            if (this.onOfflineMessages) {
+              this.onOfflineMessages(message.messages || []);
+            }
+            break;
+
+          case 'offline-message:store':
+            if (this.onOfflineMessageStored) {
+              this.onOfflineMessageStored(message.message);
+            }
+            break;
+
+          case 'offline-message:delivered':
+            if (this.onOfflineMessagesDelivered) {
+              this.onOfflineMessagesDelivered(message);
+            }
+            break;
+
+          case 'offline-message:error':
+            console.error('❌ Offline message error:', message.message);
+            if (this.onOfflineMessageError) {
+              this.onOfflineMessageError(message.message);
             }
             break;
             
@@ -387,13 +428,29 @@ class WebRTCManager {
     return false;
   }
 
+  storeOfflineMessage(message) {
+    return this.sendSignalingMessage({
+      type: 'offline-message:store',
+      ...message
+    });
+  }
+
+  acknowledgeOfflineMessages(messageIds) {
+    return this.sendSignalingMessage({
+      type: 'offline-message:delivered',
+      messageIds
+    });
+  }
+
   /**
    * Send signaling message through WebSocket
    */
   sendSignalingMessage(message) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
+      return true;
     }
+    return false;
   }
 
   getAuthenticatedSignalingUrl() {

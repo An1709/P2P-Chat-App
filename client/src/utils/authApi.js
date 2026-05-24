@@ -63,3 +63,12 @@ export async function getCurrentUser(token) {
     }
   });
 }
+
+export async function getKnownUsers(token) {
+  return requestAuth('/api/users', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}

@@ -293,6 +293,82 @@ server/data/pending-users.json
 
 File `users.json` chỉ chứa tài khoản đã xác thực OTP. Khi người dùng đăng ký, server tạo pending registration kèm `passwordHash`, `otpHash`, `otpExpiresAt` và `createdAt`; tài khoản thật chỉ được ghi vào `users.json` sau khi OTP đúng. File này phù hợp cho demo local và bài tập môn học. Không dùng cách lưu này cho production thật.
 
+## Chức năng nâng cao
+
+### Store-and-forward khi peer offline
+
+Chức năng store-and-forward được dùng cho trường hợp gửi tin nhắn trực tiếp đến một peer đang offline hoặc không có WebRTC DataChannel sẵn sàng. Luồng bình thường của hệ thống vẫn là P2P: khi cả hai peer online và DataChannel mở, client gửi tin nhắn trực tiếp qua WebRTC DataChannel, không gửi nội dung chat qua server.
+
+Khi peer nhận không online hoặc DataChannel chưa mở, client gửi sự kiện `offline-message:store` đến signaling server. Server xác thực danh tính người gửi từ WebSocket đã đăng nhập, kiểm tra người nhận là user đã xác thực, rồi lưu tạm tin nhắn vào:
+
+```text
+server/data/offline-messages.json
+```
+
+Khi người nhận đăng nhập lại và join room, server kiểm tra tin nhắn pending theo user id và gửi về client bằng sự kiện `offline-message:pending`. Sau khi client hiển thị tin nhắn ngoại tuyến, client gửi xác nhận `offline-message:delivered`; server đánh dấu tin nhắn là `delivered` và ghi `deliveredAt`.
+
+Điểm cần nhấn mạnh khi báo cáo: server chỉ lưu tin trong trường hợp fallback khi peer offline hoặc không thể gửi qua DataChannel. Server không trở thành kênh truyền chính cho tin nhắn online.
+
+### Churn simulation
+
+Churn simulation là chức năng demo/kiểm thử dùng để mô phỏng các peer tham gia, rời mạng và tham gia lại nhiều lần. Mục tiêu là minh họa đặc trưng của hệ phân tán khi thành viên trong mạng thay đổi liên tục, đồng thời kiểm tra peer discovery, danh sách online/offline và xử lý rời phòng.
+
+Các peer mô phỏng có tên rõ ràng như:
+
+```text
+Churn Peer 1
+Churn Peer 2
+Churn Peer 3
+```
+
+Các peer này không phải user thật, không được lưu vào `server/data/users.json`, không cần OTP/login và không thiết lập WebRTC DataChannel thật. Chúng chỉ được đưa vào danh sách online/offline để phục vụ demo trạng thái mạng thay đổi liên tục.
+
+### Biến môi trường liên quan
+
+| Biến | Giá trị gợi ý | Ý nghĩa |
+| --- | --- | --- |
+| `CHURN_DEMO_ENABLED` | `true` hoặc `false` | Bật/tắt API điều khiển churn simulation. Nếu là `false`, các API churn trả về thông báo rằng demo churn đang bị tắt. |
+| Cấu hình offline message | Không có biến riêng | Tin nhắn offline được lưu local trong `server/data/offline-messages.json` để dễ demo. |
+
+Ví dụ cấu hình demo trong `server/.env`:
+
+```env
+OTP_DEMO_MODE=true
+JWT_SECRET=replace-with-a-long-random-secret-for-local-demo
+CHURN_DEMO_ENABLED=true
+```
+
+### Demo store-and-forward
+
+1. Đăng nhập bằng User A.
+2. Đảm bảo User B đã đăng ký, xác thực OTP và đang offline.
+3. Ở User A, chọn User B trong chế độ gửi tin nhắn riêng.
+4. Gửi tin nhắn đến User B.
+5. Quan sát UI của User A hiển thị trạng thái tin nhắn đã được lưu để chuyển sau.
+6. Quan sát server log có dòng `Offline message stored`.
+7. Đăng nhập lại bằng User B và join room.
+8. Quan sát User B nhận tin nhắn có nhãn `Tin nhắn ngoại tuyến`.
+9. Quan sát server log có `Pending offline messages delivered` và `Offline messages marked delivered`.
+
+### Demo churn simulation
+
+1. Đặt `CHURN_DEMO_ENABLED=true` trong `server/.env` và khởi động lại server.
+2. Đăng nhập vào giao diện chat bằng một user thật.
+3. Trong panel `Mô phỏng churn`, bấm `Bắt đầu mô phỏng churn`.
+4. Quan sát danh sách peer online thay đổi khi `Churn Peer 1`, `Churn Peer 2`, ... lần lượt join/leave.
+5. Quan sát server log có các dòng `[CHURN] Simulation started`, `[CHURN] Simulated peer joined`, `[CHURN] Simulated peer left`.
+6. Bấm `Dừng mô phỏng churn`.
+7. Quan sát các peer mô phỏng được loại khỏi danh sách online, trong khi user thật vẫn không bị ảnh hưởng.
+
+### Mapping với yêu cầu bài tập
+
+| Yêu cầu/chức năng nâng cao | Cách project đáp ứng | Ghi chú demo |
+| --- | --- | --- |
+| Store-and-forward messaging khi peer offline | Server lưu tạm tin nhắn direct trong `server/data/offline-messages.json` khi peer nhận offline hoặc DataChannel không mở | Chỉ là fallback; tin nhắn online vẫn đi qua WebRTC DataChannel |
+| Churn simulation | Server tạo peer mô phỏng join/leave/rejoin và phát sự kiện tương thích với danh sách online | Peer mô phỏng không phải user thật và không có WebRTC DataChannel |
+| Peer discovery dưới churn | Khi churn peer join/leave, server cập nhật `user-list` cho client trong room | Dùng để minh họa online/offline state thay đổi liên tục |
+| Không biến hệ thống thành client-server chat | Direct/group chat online vẫn dùng P2P DataChannel; server chỉ xử lý signaling và fallback offline | Cần nhấn mạnh trong thuyết trình |
+
 ## Troubleshooting
 
 ### `npm install` bị lỗi

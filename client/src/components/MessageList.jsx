@@ -161,6 +161,16 @@ const MessageList = ({ messages, onPinMessage, onReactToMessage, onDeleteMessage
                         <span>E2E</span>
                       </div>
                     )}
+                    {group.messages.some(msg => msg.offlineDelivered) && (
+                      <div className="flex items-center space-x-1 badge badge-blue">
+                        <span>Tin nhắn ngoại tuyến</span>
+                      </div>
+                    )}
+                    {group.messages.some(msg => msg.offlineStored) && (
+                      <div className="flex items-center space-x-1 badge badge-blue">
+                        <span>Đã lưu để gửi khi người nhận online</span>
+                      </div>
+                    )}
                     
                     <span className="text-xs text-vscode-text-muted">
                       {group.messages[0].timestamp}
@@ -199,6 +209,14 @@ const MessageList = ({ messages, onPinMessage, onReactToMessage, onDeleteMessage
                               <p className="text-vscode-text text-sm leading-relaxed break-words">
                                 {msg.text}
                               </p>
+
+                              {(msg.offlineDelivered || msg.offlineStored) && (
+                                <div className="mt-2 text-xs text-vscode-accent">
+                                  {msg.offlineDelivered
+                                    ? 'Tin nhắn ngoại tuyến'
+                                    : 'Tin nhắn sẽ được chuyển khi người nhận trực tuyến'}
+                                </div>
+                              )}
 
                               {/* Reactions */}
                               {msg.reactions && msg.reactions.length > 0 && (

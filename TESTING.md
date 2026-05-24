@@ -229,11 +229,78 @@ Mở URL mà Vite hiển thị, thường là `https://localhost:5173`.
 - Console server có log user rời phòng hoặc disconnect.
 - Nếu gửi tin nhắn đến peer đã rời đi, UI/log nên thể hiện trạng thái gửi thất bại hoặc peer không khả dụng.
 
-## 12. Checklist nhanh trước khi demo
+## 12. Test store-and-forward khi peer offline
+
+### Các bước
+
+1. Đăng nhập user A ở cửa sổ thứ nhất.
+2. Đăng nhập user B ở cửa sổ thứ hai và vào cùng phòng với user A.
+3. Đợi hai peer thấy nhau trong danh sách online.
+4. Đóng tab user B hoặc bấm `Đăng xuất` ở user B.
+5. Ở user A, chọn `Riêng: user B (offline)` trong ô `Gửi tới`.
+6. Gửi một tin nhắn trực tiếp.
+7. Quan sát console server có log `Offline message stored`.
+8. Đăng nhập lại user B và vào phòng.
+9. Quan sát user B nhận tin nhắn có nhãn `Tin nhắn ngoại tuyến`.
+10. Quan sát console server có log `Pending offline messages delivered` và `Offline messages marked delivered`.
+
+### Kết quả mong đợi
+
+- Khi user B offline, tin nhắn direct không được gửi qua DataChannel mà được lưu vào `server/data/offline-messages.json`.
+- Khi user B reconnect/join phòng, server gửi các tin đang pending qua event `offline-message:pending`.
+- Client user B hiển thị tin nhắn offline và gửi xác nhận `offline-message:delivered`.
+- Server đánh dấu các tin đó là `delivered`.
+- Khi cả hai peer online và DataChannel sẵn sàng, direct chat vẫn đi qua WebRTC DataChannel như trước.
+
+## 13. Test churn simulation
+
+### Chuẩn bị
+
+Trong file `server/.env`, bật:
+
+```env
+CHURN_DEMO_ENABLED=true
+```
+
+Khởi động lại server sau khi đổi biến môi trường.
+
+### Các bước
+
+1. Đăng nhập ít nhất một user thật và vào phòng `general`.
+2. Gửi request bắt đầu churn:
+
+   ```bash
+   curl -k -X POST https://localhost:3001/api/churn/start ^
+     -H "Content-Type: application/json" ^
+     -d "{\"peerCount\":3,\"joinIntervalMs\":1000,\"leaveIntervalMs\":2000,\"roomId\":\"general\",\"maxCycles\":3}"
+   ```
+
+3. Quan sát sidebar danh sách online.
+4. Gửi request xem trạng thái:
+
+   ```bash
+   curl -k https://localhost:3001/api/churn/status
+   ```
+
+5. Dừng churn:
+
+   ```bash
+   curl -k -X POST https://localhost:3001/api/churn/stop
+   ```
+
+### Kết quả mong đợi
+
+- Sidebar lần lượt xuất hiện và biến mất các peer giả như `Churn Peer 1`, `Churn Peer 2`, `Churn Peer 3`.
+- Console server có log `[CHURN] Simulation started`, `[CHURN] Simulated peer joined`, `[CHURN] Simulated peer left`, `[CHURN] Simulation stopped`.
+- Peer giả chỉ phục vụ demo online/offline và peer discovery update; không yêu cầu WebRTC DataChannel thật.
+- Direct chat, group chat và file sharing giữa user thật vẫn hoạt động như trước.
+
+## 14. Checklist nhanh trước khi demo
 
 - Server khởi động không lỗi.
 - Client khởi động không lỗi.
 - `OTP_DEMO_MODE=true` in OTP trong console server.
+- `CHURN_DEMO_ENABLED=true` nếu cần demo churn simulation.
 - Đăng ký không tạo user thật trước OTP.
 - OTP sai không tạo user.
 - OTP đúng tạo user verified và xóa pending.
@@ -243,3 +310,214 @@ Mở URL mà Vite hiển thị, thường là `https://localhost:5173`.
 - Group chat với ba user hoạt động.
 - Đóng tab cập nhật online/offline.
 - Có thể giải thích rõ: server là Auth/Bootstrap/Signaling server, còn chat message ưu tiên đi qua WebRTC DataChannel P2P.
+
+## 15. Test case bổ sung cho chức năng nâng cao
+
+Các test case dưới đây dùng để kiểm tra riêng hai chức năng nâng cao và bảo đảm chúng không làm hỏng luồng P2P/WebRTC hiện có.
+
+### TC-ADV-01: Lưu tin nhắn offline khi người nhận không online
+
+Mục tiêu: kiểm tra server chỉ lưu tin nhắn khi peer nhận offline hoặc DataChannel không khả dụng.
+
+Điều kiện trước:
+
+- User A và User B đã đăng ký, xác thực OTP và đăng nhập thành công ít nhất một lần.
+- Server đang chạy.
+- User A đang online trong phòng chat.
+- User B đang offline.
+
+Các bước:
+
+1. Ở User A, chọn chế độ gửi riêng đến User B.
+2. Gửi một tin nhắn trực tiếp đến User B.
+3. Quan sát thông báo trên UI của User A.
+4. Mở file `server/data/offline-messages.json`.
+5. Quan sát console server.
+
+Kết quả mong đợi:
+
+- Tin nhắn không được gửi qua DataChannel bình thường vì User B offline.
+- UI hiển thị một trong các thông báo: `Đã lưu để gửi khi người nhận online` hoặc `Tin nhắn sẽ được chuyển khi người nhận trực tuyến`.
+- Console server có log `Offline message stored`.
+- File `server/data/offline-messages.json` có bản ghi mới với:
+  - `fromUserId` là User A,
+  - `toUserId` là User B,
+  - `type: "direct"`,
+  - `status: "pending"`,
+  - `deliveredAt: null`.
+- Không có mật khẩu, OTP hoặc secret nào được ghi vào file offline message.
+
+### TC-ADV-02: Giao tin nhắn offline khi người nhận reconnect
+
+Mục tiêu: kiểm tra server giao tin nhắn pending cho đúng người nhận khi user reconnect/join room.
+
+Điều kiện trước:
+
+- Đã thực hiện TC-ADV-01.
+- Trong `server/data/offline-messages.json` có ít nhất một tin nhắn pending gửi đến User B.
+- User B vẫn đang offline trước khi bắt đầu test.
+
+Các bước:
+
+1. Đăng nhập bằng User B.
+2. Cho User B vào cùng phòng chat.
+3. Quan sát vùng chat của User B.
+4. Quan sát console server.
+5. Mở lại `server/data/offline-messages.json`.
+
+Kết quả mong đợi:
+
+- User B nhận được sự kiện `offline-message:pending` từ server.
+- UI của User B hiển thị tin nhắn với nhãn `Tin nhắn ngoại tuyến`.
+- UI có thông báo `Bạn có tin nhắn ngoại tuyến mới.` hoặc `Đã nhận tin nhắn ngoại tuyến.`
+- Client gửi xác nhận `offline-message:delivered` về server.
+- Console server có log `Pending offline messages delivered` và `Offline messages marked delivered`.
+- Tin nhắn trong `server/data/offline-messages.json` được cập nhật:
+  - `status: "delivered"`,
+  - `deliveredAt` có giá trị thời gian.
+
+### TC-ADV-03: Start/stop churn simulation
+
+Mục tiêu: kiểm tra chức năng mô phỏng churn có thể bật/tắt và cập nhật danh sách peer online.
+
+Điều kiện trước:
+
+- Trong `server/.env` có:
+
+  ```env
+  CHURN_DEMO_ENABLED=true
+  ```
+
+- Server đã được restart sau khi đổi biến môi trường.
+- Có ít nhất một user thật đã đăng nhập và đang ở phòng `general` hoặc phòng được chọn trong panel churn.
+
+Các bước:
+
+1. Trong giao diện chat, tìm panel `Mô phỏng churn`.
+2. Chọn số peer mô phỏng, ví dụ `3`.
+3. Chọn `Join ms` và `Leave ms`, ví dụ `1000` và `2000`.
+4. Bấm `Bắt đầu mô phỏng churn`.
+5. Quan sát sidebar danh sách online trong vài chu kỳ.
+6. Quan sát console server.
+7. Bấm `Dừng mô phỏng churn`.
+8. Quan sát lại sidebar.
+
+Kết quả mong đợi:
+
+- UI hiển thị trạng thái `Đang mô phỏng` sau khi start.
+- Sidebar xuất hiện peer mô phỏng như `Churn Peer 1`, `Churn Peer 2`, `Churn Peer 3`.
+- Peer mô phỏng có nhãn `peer mô phỏng` hoặc tên rõ ràng để không nhầm với user thật.
+- Peer mô phỏng join/leave nhiều lần, làm danh sách online thay đổi.
+- Console server có log:
+  - `[CHURN] Simulation started`,
+  - `[CHURN] Simulated peer joined`,
+  - `[CHURN] Simulated peer left`,
+  - `[CHURN] Simulation stopped`.
+- Sau khi stop, UI hiển thị `Đã dừng`.
+- Các peer mô phỏng biến mất khỏi danh sách online hoặc không còn được đánh dấu online.
+- User thật không bị logout, không mất kết nối chat và không bị lưu vào dữ liệu churn.
+
+### TC-ADV-04: Churn bị tắt bằng biến môi trường
+
+Mục tiêu: kiểm tra API churn không hoạt động khi chưa bật demo mode.
+
+Điều kiện trước:
+
+- Trong `server/.env` đặt:
+
+  ```env
+  CHURN_DEMO_ENABLED=false
+  ```
+
+- Restart server.
+
+Các bước:
+
+1. Đăng nhập vào giao diện chat.
+2. Bấm `Bắt đầu mô phỏng churn`.
+3. Hoặc gọi API:
+
+   ```bash
+   curl -k -X POST https://localhost:3001/api/churn/start ^
+     -H "Content-Type: application/json" ^
+     -d "{\"peerCount\":3,\"joinIntervalMs\":1000,\"leaveIntervalMs\":2000,\"roomId\":\"general\"}"
+   ```
+
+Kết quả mong đợi:
+
+- Server từ chối yêu cầu churn.
+- UI hoặc API trả về thông báo tiếng Việt cho biết churn demo đang bị tắt và cần đặt `CHURN_DEMO_ENABLED=true`.
+- Danh sách peer online không xuất hiện peer mô phỏng.
+- Chat thật không bị ảnh hưởng.
+
+### TC-REG-01: Direct P2P chat vẫn hoạt động khi cả hai peer online
+
+Mục tiêu: kiểm tra store-and-forward không biến hệ thống thành chat client-server tập trung.
+
+Điều kiện trước:
+
+- User A và User B đều online trong cùng phòng.
+- Hai peer đã thấy nhau trong sidebar.
+- Chờ DataChannel sẵn sàng nếu trình duyệt cần vài giây để thiết lập WebRTC.
+
+Các bước:
+
+1. Ở User A, chọn gửi riêng đến User B.
+2. Gửi một tin nhắn trực tiếp.
+3. Quan sát User B nhận tin.
+4. Quan sát server log và file `server/data/offline-messages.json`.
+
+Kết quả mong đợi:
+
+- User B nhận tin nhắn trực tiếp.
+- Tin nhắn online không được lưu như offline message mới trong `server/data/offline-messages.json`.
+- Không xuất hiện nhãn `Tin nhắn ngoại tuyến` cho tin nhắn này.
+- Có thể giải thích rằng đường truyền chính vẫn là WebRTC DataChannel.
+
+### TC-REG-02: Group chat vẫn hoạt động sau khi thêm offline message và churn
+
+Mục tiêu: kiểm tra churn simulation và offline fallback không làm hỏng chat nhóm.
+
+Điều kiện trước:
+
+- Có ít nhất ba user thật online trong cùng một phòng.
+- Nếu đang bật churn, có thể để churn chạy hoặc đã stop; cả hai trường hợp đều nên kiểm tra được.
+
+Các bước:
+
+1. User A chọn gửi đến `Cả phòng`.
+2. User A gửi một tin nhắn nhóm.
+3. User B và User C quan sát vùng chat.
+4. User B gửi lại một tin nhắn nhóm.
+5. Nếu churn đang chạy, quan sát peer mô phỏng trong sidebar nhưng không chọn để gửi tin trực tiếp.
+
+Kết quả mong đợi:
+
+- User B và User C đều nhận tin nhắn nhóm từ User A.
+- User A và User C đều nhận tin nhắn nhóm từ User B.
+- Peer mô phỏng không nhận chat thật và không tạo DataChannel.
+- Chat nhóm vẫn dùng các DataChannel giữa user thật.
+- Server không lưu group message vào `offline-messages.json`.
+
+### TC-REG-03: Không gửi tin nhắn thật đến peer mô phỏng
+
+Mục tiêu: kiểm tra UI phân biệt peer mô phỏng và user thật.
+
+Điều kiện trước:
+
+- `CHURN_DEMO_ENABLED=true`.
+- Churn simulation đang chạy.
+- Sidebar đang hiển thị ít nhất một peer mô phỏng.
+
+Các bước:
+
+1. Quan sát peer mô phỏng trong sidebar.
+2. Kiểm tra danh sách chọn người nhận trực tiếp trong ô chat.
+3. Nếu có cách chọn peer mô phỏng, thử gửi tin đến peer đó.
+
+Kết quả mong đợi:
+
+- Peer mô phỏng được ghi nhãn rõ ràng là `peer mô phỏng`.
+- Peer mô phỏng không nên xuất hiện như một người nhận direct chat thật.
+- Nếu người dùng vẫn cố gửi tin đến peer mô phỏng, UI hiển thị: `Đây là peer mô phỏng, không hỗ trợ nhắn tin trực tiếp.`
+- App không crash và các user thật vẫn chat bình thường.

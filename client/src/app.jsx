@@ -15,7 +15,7 @@ import WebRTCManager from './utils/webrtc';
 import CryptoUtils from './utils/crypto';
 import FileTransferManager from './utils/fileTransfer';
 import notificationSounds from './utils/notificationSounds';
-import { getCurrentUser } from './utils/authApi';
+import { getCurrentUser, getKnownUsers } from './utils/authApi';
 
 // const getSignalingServerUrl = () => {
 //   const hostname = window.location.hostname;
@@ -30,6 +30,11 @@ import { getCurrentUser } from './utils/authApi';
 // Use the production URL from Vercel's environment variables,
 // but fall back to our local server for development.
 const SIGNALING_SERVER = import.meta.env.VITE_WEBSOCKET_URL || 'wss://localhost:3001';
+const API_BASE_URL = import.meta.env.VITE_API_URL || signalingToHttpUrl(SIGNALING_SERVER);
+
+function signalingToHttpUrl(url) {
+  return url.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/$/, '');
+}
 
 const AVAILABLE_ROOMS = [
   { id: 'general', name: 'chung', icon: '🏠', description: 'Phòng chat chung' },
@@ -61,10 +66,21 @@ function App() {
     coding: { messages: [], roomUsers: [], fileTransfers: [] },
     random: { messages: [], roomUsers: [], fileTransfers: [] },
   });
+  const [offlineDirectPeers, setOfflineDirectPeers] = useState([]);
+  const [knownUsers, setKnownUsers] = useState([]);
   
   // Connection state
   const [connectionState, setConnectionState] = useState('disconnected');
   const [isSending, setIsSending] = useState(false);
+  const [churnConfig, setChurnConfig] = useState({
+    peerCount: 3,
+    joinIntervalMs: 1000,
+    leaveIntervalMs: 2000,
+    roomId: 'general'
+  });
+  const [churnStatus, setChurnStatus] = useState('stopped');
+  const [churnMessage, setChurnMessage] = useState('');
+  const [isChurnLoading, setIsChurnLoading] = useState(false);
   
   // New feature states
   const [pinnedMessages, setPinnedMessages] = useState([]);
@@ -92,6 +108,7 @@ function App() {
 
   useEffect(() => {
     currentRoomIdRef.current = currentRoomId;
+    setChurnConfig(prev => ({ ...prev, roomId: currentRoomId }));
   }, [currentRoomId]);
 
   // Get current room state
@@ -129,6 +146,34 @@ function App() {
 
     restoreSession();
   }, []);
+
+  useEffect(() => {
+    if (!authToken || !user?.id) {
+      setKnownUsers([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadKnownUsers = async () => {
+      try {
+        const result = await getKnownUsers(authToken);
+        if (!cancelled) {
+          setKnownUsers(Array.isArray(result.users) ? result.users : []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Không thể tải danh sách người dùng để gửi offline:', error);
+          setKnownUsers([]);
+        }
+      }
+    };
+
+    loadKnownUsers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, user?.id]);
 
   // Authenticated user identity stays separate from WebRTC transport.
   const handleLoginAuthenticated = (authenticatedUser, token) => {
@@ -179,6 +224,8 @@ function App() {
       coding: { messages: [], roomUsers: [], fileTransfers: [] },
       random: { messages: [], roomUsers: [], fileTransfers: [] },
     });
+    setOfflineDirectPeers([]);
+    setKnownUsers([]);
   };
 
   // Handle Get Started button
@@ -296,6 +343,70 @@ function App() {
     }
   };
 
+  const requestChurn = async (path, body = null) => {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.message || 'Không thể điều khiển mô phỏng churn.');
+    }
+
+    return data;
+  };
+
+  const handleStartChurn = async () => {
+    setIsChurnLoading(true);
+    setChurnMessage('');
+
+    try {
+      const result = await requestChurn('/api/churn/start', {
+        peerCount: Number(churnConfig.peerCount),
+        joinIntervalMs: Number(churnConfig.joinIntervalMs),
+        leaveIntervalMs: Number(churnConfig.leaveIntervalMs),
+        roomId: churnConfig.roomId || currentRoomIdRef.current
+      });
+
+      setChurnStatus(result.status?.running ? 'running' : 'stopped');
+      setChurnMessage(result.message || 'Đã bắt đầu mô phỏng churn.');
+      addSystemMessage('Đã bắt đầu mô phỏng churn.', currentRoomIdRef.current);
+    } catch (error) {
+      setChurnMessage(error.message || 'Không thể bắt đầu mô phỏng churn.');
+      addSystemMessage(error.message || 'Không thể bắt đầu mô phỏng churn.', currentRoomIdRef.current);
+    } finally {
+      setIsChurnLoading(false);
+    }
+  };
+
+  const handleStopChurn = async () => {
+    setIsChurnLoading(true);
+    setChurnMessage('');
+
+    try {
+      const result = await requestChurn('/api/churn/stop', {});
+      setChurnStatus(result.status?.running ? 'running' : 'stopped');
+      setChurnMessage(result.message || 'Đã dừng mô phỏng churn.');
+      addSystemMessage('Đã dừng mô phỏng churn.', currentRoomIdRef.current);
+    } catch (error) {
+      setChurnMessage(error.message || 'Không thể dừng mô phỏng churn.');
+      addSystemMessage(error.message || 'Không thể dừng mô phỏng churn.', currentRoomIdRef.current);
+    } finally {
+      setIsChurnLoading(false);
+    }
+  };
+
+  const handleChurnConfigChange = (field, value) => {
+    setChurnConfig(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
   // Initialize connection when authenticated and displayName is set
   useEffect(() => {
     if (initializedRef.current || initializingRef.current || !user?.id || !authToken || !displayName) {
@@ -323,10 +434,18 @@ function App() {
             if (!peerUsernamesRef.current.has(user.userId)) {
               peerUsernamesRef.current.set(user.userId, user.username);
             }
+            if (user.simulated) {
+              console.log('[CHURN] simulated peer discovered:', user.username, user.userId);
+              continue;
+            }
             console.log('[P2P] peer discovered:', user.username, user.userId);
             await initializePeerCrypto(user.userId, webrtcManager, user.username);
             addSystemMessage(`Đang kết nối tới ${user.username}...`, roomId);
           }
+
+          setOfflineDirectPeers(prev =>
+            prev.filter(peer => !data.users.some(onlineUser => onlineUser.userId === peer.userId))
+          );
           
           setConnectionState('connected');
         };
@@ -337,13 +456,38 @@ function App() {
           }
           
           addSystemMessage(`${data.username} đã tham gia`, currentRoomIdRef.current);
+          if (data.simulated) {
+            console.log('[CHURN] simulated peer joined:', data.username, data.userId);
+            return;
+          }
           console.log('[P2P] peer discovered:', data.username, data.userId);
+          setOfflineDirectPeers(prev => prev.filter(peer => peer.userId !== data.userId));
           await initializePeerCrypto(data.userId, webrtcManager, data.username);
         };
         
         webrtcManager.onUserLeft = (data) => {
           const leavingUsername = peerUsernamesRef.current.get(data.userId) || data.username;
           addSystemMessage(`${leavingUsername} đã rời phòng`, currentRoomIdRef.current);
+
+          if (data.simulated) {
+            console.log('[CHURN] simulated peer left:', leavingUsername, data.userId);
+            peerUsernamesRef.current.delete(data.userId);
+            return;
+          }
+
+          setOfflineDirectPeers(prev => {
+            const nextPeer = {
+              userId: data.userId,
+              username: leavingUsername,
+              displayName: leavingUsername,
+              offline: true
+            };
+
+            return [
+              nextPeer,
+              ...prev.filter(peer => peer.userId !== data.userId)
+            ].slice(0, 10);
+          });
           
           peerCryptoRef.current.delete(data.userId);
           fileManagersRef.current.delete(data.userId);
@@ -558,6 +702,48 @@ function App() {
         webrtcManager.onError = (error) => {
           addSystemMessage(`Lỗi: ${error}`, currentRoomIdRef.current);
         };
+
+        webrtcManager.onOfflineMessages = (offlineMessages) => {
+          if (!offlineMessages.length) return;
+
+          const messageIds = [];
+          for (const offlineMessage of offlineMessages) {
+            const roomId = offlineMessage.roomId || currentRoomIdRef.current;
+            const senderName = offlineMessage.fromDisplayName || 'Không rõ';
+
+            messageIds.push(offlineMessage.id);
+            addMessageWithId(
+              offlineMessage.id,
+              senderName,
+              offlineMessage.content,
+              false,
+              roomId,
+              senderName,
+              offlineMessage.fromUserId,
+              { offlineDelivered: true }
+            );
+          }
+
+          addSystemMessage('Bạn có tin nhắn ngoại tuyến mới.', currentRoomIdRef.current);
+          if (webrtcManager.acknowledgeOfflineMessages(messageIds)) {
+            addSystemMessage('Đã nhận tin nhắn ngoại tuyến.', currentRoomIdRef.current);
+          }
+        };
+
+        webrtcManager.onOfflineMessageStored = (offlineMessage) => {
+          const targetName = offlineMessage?.toDisplayName || 'peer offline';
+          addSystemMessage(`Đã lưu để gửi khi người nhận online: ${targetName}`, currentRoomIdRef.current);
+        };
+
+        webrtcManager.onOfflineMessagesDelivered = (result) => {
+          if (result.deliveredCount > 0) {
+            console.log('[Offline] messages marked delivered:', result.deliveredCount);
+          }
+        };
+
+        webrtcManager.onOfflineMessageError = (message) => {
+          addSystemMessage(message ? `Không thể lưu tin nhắn ngoại tuyến. ${message}` : 'Không thể lưu tin nhắn ngoại tuyến.', currentRoomIdRef.current);
+        };
         
         const cryptoUtils = new CryptoUtils();
         await cryptoUtils.generateKeyPair();
@@ -693,8 +879,13 @@ function App() {
   };
 
   const handleSendMessage = async (text, targetPeerId = 'group') => {
-    if (!webrtc || peerCryptoRef.current.size === 0) {
+    if (!webrtc) {
       addSystemMessage('Chưa có peer nào kết nối', currentRoomIdRef.current);
+      return;
+    }
+
+    if (!user?.id || !selfIdRef.current) {
+      addSystemMessage('Thiếu thông tin người dùng đã đăng nhập.', currentRoomIdRef.current);
       return;
     }
     
@@ -703,9 +894,30 @@ function App() {
       
       const sharedMessageId = `${selfIdRef.current}-${Date.now()}`;
       const isDirect = targetPeerId && targetPeerId !== 'group';
+      if (!isDirect && peerCryptoRef.current.size === 0) {
+        addSystemMessage('Chưa có peer nào kết nối', currentRoomIdRef.current);
+        return;
+      }
+
+      if (isDirect && !directMessagePeers.some(peer => peer.userId === targetPeerId)) {
+        const selectedRoomPeer = roomUsers.find(peer => peer.userId === targetPeerId);
+        if (selectedRoomPeer?.simulated) {
+          addSystemMessage('Đây là peer mô phỏng, không hỗ trợ nhắn tin trực tiếp.', currentRoomIdRef.current);
+          return;
+        }
+
+        addSystemMessage('Vui lòng chọn người nhận hợp lệ.', currentRoomIdRef.current);
+        return;
+      }
+
       const targetPeerIds = isDirect ? [targetPeerId] : Array.from(peerCryptoRef.current.keys());
       const targetName = isDirect
-        ? (peerUsernamesRef.current.get(targetPeerId) || targetPeerId)
+        ? (
+            peerUsernamesRef.current.get(targetPeerId) ||
+            directMessagePeers.find(peer => peer.userId === targetPeerId)?.displayName ||
+            directMessagePeers.find(peer => peer.userId === targetPeerId)?.username ||
+            targetPeerId
+          )
         : 'cả phòng';
       let sentCount = 0;
       
@@ -724,6 +936,7 @@ function App() {
               targetId: isDirect ? targetPeerId : null
             };
             
+            // Online direct messages keep using the WebRTC DataChannel path.
             const sent = webrtc.sendMessageToPeer(peerId, JSON.stringify(messageObj));
             if (sent) sentCount++;
           } catch (error) {
@@ -733,6 +946,33 @@ function App() {
       }
       
       if (sentCount === 0) {
+        if (isDirect) {
+          const stored = storeOfflineDirectMessage({
+            id: sharedMessageId,
+            text,
+            targetPeerId,
+            targetName
+          });
+          if (!stored) {
+            addSystemMessage('Không thể lưu tin nhắn ngoại tuyến.', currentRoomIdRef.current);
+            return;
+          }
+
+          // If the peer is offline or the DataChannel is closed, use server store-and-forward fallback.
+          addSystemMessage('Người nhận đang offline. Tin nhắn đã được lưu để chuyển sau.', currentRoomIdRef.current);
+          addMessageWithId(
+            sharedMessageId,
+            displayNameRef.current,
+            text,
+            false,
+            currentRoomIdRef.current,
+            displayNameRef.current,
+            selfIdRef.current,
+            { offlineStored: true }
+          );
+          return;
+        }
+
         addSystemMessage('Gửi tin nhắn thất bại: chưa có DataChannel sẵn sàng', currentRoomIdRef.current);
         console.warn('[P2P] message send failed, no ready DataChannel:', { targetPeerId });
         return;
@@ -757,6 +997,21 @@ function App() {
     } finally {
       setIsSending(false);
     }
+  };
+
+  const storeOfflineDirectMessage = ({ id, text, targetPeerId, targetName }) => {
+    if (!webrtc || !targetPeerId || !user?.id || !selfIdRef.current) {
+      return false;
+    }
+
+    return webrtc.storeOfflineMessage({
+      id,
+      toUserId: targetPeerId,
+      toDisplayName: targetName,
+      roomId: currentRoomIdRef.current,
+      content: text,
+      messageType: 'direct'
+    });
   };
 
   const handleFileSelect = async (file) => {
@@ -804,7 +1059,7 @@ function App() {
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
   };
 
-  const addMessageWithId = (messageId, sender, text, encrypted = false, roomId, senderDisplayName, senderId = null) => {
+  const addMessageWithId = (messageId, sender, text, encrypted = false, roomId, senderDisplayName, senderId = null, metadata = {}) => {
     const newMessage = {
       id: messageId,
       sender,
@@ -813,7 +1068,8 @@ function App() {
       senderDisplayName,
       senderId,
       reactions: [],
-      timestamp: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+      timestamp: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+      ...metadata
     };
     
     // Play notification sound for incoming messages (not from self or system)
@@ -877,6 +1133,28 @@ function App() {
     );
   }
 
+  const knownDirectPeers = knownUsers.map((knownUser) => {
+    const onlinePeer = roomUsers.find(peer => peer.userId === knownUser.id);
+    return onlinePeer || {
+      userId: knownUser.id,
+      username: knownUser.displayName || knownUser.email,
+      displayName: knownUser.displayName || knownUser.email,
+      offline: true,
+      knownUser: true
+    };
+  });
+
+  const directMessagePeers = [
+    ...roomUsers,
+    ...offlineDirectPeers,
+    ...knownDirectPeers
+  ]
+    .filter(peer => peer.userId !== selfIdRef.current)
+    .filter(peer => !peer.simulated)
+    .filter((peer, index, peers) => {
+      return peers.findIndex(candidate => candidate.userId === peer.userId) === index;
+    });
+
   // Show chat interface (authenticated)
   return (
     <div className="flex h-screen bg-vscode-dark">
@@ -912,6 +1190,85 @@ function App() {
           </div>
         </div>
 
+        <div className="px-4 py-3 border-b border-vscode-border bg-vscode-dark/70">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[150px]">
+              <div className="text-xs font-semibold text-vscode-text-muted mb-1">Mô phỏng churn</div>
+              <div className={`text-sm font-semibold ${churnStatus === 'running' ? 'text-green-400' : 'text-vscode-text-secondary'}`}>
+                {churnStatus === 'running' ? 'Đang mô phỏng' : 'Đã dừng'}
+              </div>
+            </div>
+
+            <label className="text-xs text-vscode-text-muted">
+              Số peer
+              <input
+                type="number"
+                min="3"
+                max="10"
+                value={churnConfig.peerCount}
+                onChange={(event) => handleChurnConfigChange('peerCount', event.target.value)}
+                className="mt-1 w-20 bg-vscode-card border border-vscode-border text-vscode-text rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-p2p-orange/50"
+              />
+            </label>
+
+            <label className="text-xs text-vscode-text-muted">
+              Join ms
+              <input
+                type="number"
+                min="500"
+                value={churnConfig.joinIntervalMs}
+                onChange={(event) => handleChurnConfigChange('joinIntervalMs', event.target.value)}
+                className="mt-1 w-24 bg-vscode-card border border-vscode-border text-vscode-text rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-p2p-orange/50"
+              />
+            </label>
+
+            <label className="text-xs text-vscode-text-muted">
+              Leave ms
+              <input
+                type="number"
+                min="500"
+                value={churnConfig.leaveIntervalMs}
+                onChange={(event) => handleChurnConfigChange('leaveIntervalMs', event.target.value)}
+                className="mt-1 w-24 bg-vscode-card border border-vscode-border text-vscode-text rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-p2p-orange/50"
+              />
+            </label>
+
+            <label className="text-xs text-vscode-text-muted">
+              Phòng
+              <input
+                type="text"
+                value={churnConfig.roomId}
+                onChange={(event) => handleChurnConfigChange('roomId', event.target.value)}
+                className="mt-1 w-28 bg-vscode-card border border-vscode-border text-vscode-text rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-p2p-orange/50"
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={handleStartChurn}
+              disabled={isChurnLoading || churnStatus === 'running'}
+              className="px-3 py-2 rounded-lg bg-p2p-orange text-vscode-dark text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Bắt đầu mô phỏng churn
+            </button>
+
+            <button
+              type="button"
+              onClick={handleStopChurn}
+              disabled={isChurnLoading || churnStatus === 'stopped'}
+              className="px-3 py-2 rounded-lg bg-vscode-card border border-vscode-border text-vscode-text text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Dừng mô phỏng churn
+            </button>
+
+            {churnMessage && (
+              <div className="text-xs text-vscode-text-secondary">
+                {churnMessage}
+              </div>
+            )}
+          </div>
+        </div>
+
         
         <MessageList 
           messages={messages}
@@ -932,9 +1289,10 @@ function App() {
         <ChatWindow 
           onSendMessage={handleSendMessage}
           onFileSelect={handleFileSelect}
-          isConnected={peerCryptoRef.current.size > 0}
+          isConnected={peerCryptoRef.current.size > 0 || directMessagePeers.length > 0}
+          hasP2PConnection={peerCryptoRef.current.size > 0}
           isSending={isSending}
-          peers={roomUsers}
+          peers={directMessagePeers}
         />
       </div>
     </div>

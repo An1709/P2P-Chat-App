@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Send, Paperclip, Lock } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, isSending, peers = [] }) => {
+const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, hasP2PConnection = isConnected, isSending, peers = [] }) => {
   const [message, setMessage] = useState('');
   const [targetPeerId, setTargetPeerId] = useState('group');
   const fileInputRef = useRef(null);
@@ -11,7 +11,10 @@ const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, isSending, peers
     if (targetPeerId !== 'group' && !peers.some((peer) => peer.userId === targetPeerId)) {
       setTargetPeerId('group');
     }
-  }, [peers, targetPeerId]);
+    if (targetPeerId === 'group' && !hasP2PConnection && peers.length > 0) {
+      setTargetPeerId(peers[0].userId);
+    }
+  }, [hasP2PConnection, peers, targetPeerId]);
 
   const handleSubmit = (event) => {
     event.preventDefault();
@@ -58,10 +61,10 @@ const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, isSending, peers
               onChange={(event) => setTargetPeerId(event.target.value)}
               className="bg-vscode-card border border-vscode-border text-vscode-text text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-p2p-orange/50"
             >
-              <option value="group">Cả phòng</option>
+              <option value="group" disabled={!hasP2PConnection}>Cả phòng</option>
               {peers.map((peer) => (
                 <option key={peer.userId} value={peer.userId}>
-                  Riêng: {peer.displayName || peer.username}
+                  Riêng: {peer.displayName || peer.username}{peer.offline ? ' (offline)' : ''}
                 </option>
               ))}
             </select>
@@ -74,7 +77,7 @@ const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, isSending, peers
             whileTap={{ scale: 0.95 }}
             type="button"
             onClick={handleFileClick}
-            disabled={!isConnected}
+            disabled={!hasP2PConnection}
             className="flex-shrink-0 w-11 h-11 rounded-xl bg-vscode-card hover:bg-vscode-hover border border-vscode-border hover:border-p2p-orange/30 text-vscode-text-secondary hover:text-p2p-orange transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             title="Đính kèm tệp"
           >
@@ -98,7 +101,7 @@ const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, isSending, peers
               className="chat-input pr-12"
             />
 
-            {isConnected && (
+            {hasP2PConnection && (
               <motion.div
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
@@ -132,8 +135,8 @@ const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, isSending, peers
             className="mt-3 flex items-center space-x-4 text-xs text-vscode-text-muted"
           >
             <div className="flex items-center space-x-1">
-              <div className="status-dot status-encrypted" />
-              <span>Mã hóa đầu cuối</span>
+              <div className={`status-dot ${hasP2PConnection ? 'status-encrypted' : 'bg-yellow-400'}`} />
+              <span>{hasP2PConnection ? 'Mã hóa đầu cuối' : 'Có thể gửi tin offline'}</span>
             </div>
             <span>•</span>
             <span>Nhấn Enter để gửi</span>

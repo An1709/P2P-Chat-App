@@ -143,6 +143,9 @@ const ChannelSidebar = ({
                     <div className="text-sm font-medium text-vscode-text truncate">
                       {user.displayName || user.username}
                     </div>
+                    {user.simulated && (
+                      <div className="text-xs text-vscode-accent">peer mô phỏng</div>
+                    )}
                   </div>
                   <div className="w-2 h-2 rounded-full bg-green-400 shadow-lg shadow-green-400/50" />
                 </motion.div>
