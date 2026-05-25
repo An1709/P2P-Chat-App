@@ -5,6 +5,8 @@ import { motion } from 'framer-motion';
 const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, hasP2PConnection = isConnected, isSending, peers = [] }) => {
   const [message, setMessage] = useState('');
   const [targetPeerId, setTargetPeerId] = useState('group');
+  const [pendingFile, setPendingFile] = useState(null);
+  const [fileError, setFileError] = useState('');
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -25,15 +27,64 @@ const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, hasP2PConnection
   };
 
   const handleFileClick = () => {
+    setFileError('');
+    const target = getSelectedTarget();
+    if (!target) {
+      setFileError('Vui lòng chọn người nhận trước khi gửi tệp.');
+      return;
+    }
+    if (target.simulated) {
+      setFileError('Đây là peer mô phỏng, không hỗ trợ gửi tệp.');
+      return;
+    }
     fileInputRef.current?.click();
   };
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0];
     if (file) {
-      onFileSelect(file);
+      setPendingFile(file);
       event.target.value = '';
     }
+  };
+
+  const getSelectedTarget = () => {
+    if (targetPeerId === 'group') {
+      return hasP2PConnection
+        ? { id: 'group', name: 'cả phòng', label: 'Cả phòng', offline: false, group: true }
+        : null;
+    }
+
+    const peer = peers.find((candidate) => candidate.userId === targetPeerId);
+    if (!peer) return null;
+
+    const peerName = peer.displayName || peer.username || peer.userId;
+    return {
+      id: peer.userId,
+      name: peerName,
+      label: `Riêng: ${peerName}${peer.simulated ? ' (mô phỏng)' : ''}`,
+      offline: Boolean(peer.offline),
+      simulated: Boolean(peer.simulated),
+      group: false
+    };
+  };
+
+  const selectedTarget = getSelectedTarget();
+
+  const handleConfirmFileSend = () => {
+    if (!pendingFile || !selectedTarget) {
+      setFileError('Vui lòng chọn người nhận trước khi gửi tệp.');
+      return;
+    }
+
+    onFileSelect(pendingFile, targetPeerId);
+    setPendingFile(null);
+    setFileError('');
+  };
+
+  const handleCancelFileSend = () => {
+    setPendingFile(null);
+    setFileError('');
   };
 
   return (
@@ -64,10 +115,13 @@ const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, hasP2PConnection
               <option value="group" disabled={!hasP2PConnection}>Cả phòng</option>
               {peers.map((peer) => (
                 <option key={peer.userId} value={peer.userId}>
-                  Riêng: {peer.displayName || peer.username}{peer.offline ? ' (offline)' : ''}
+                  Riêng: {peer.displayName || peer.username}{peer.simulated ? ' (mô phỏng)' : peer.offline ? ' (offline)' : ''}
                 </option>
               ))}
             </select>
+            <span className="text-xs text-vscode-text-muted">
+              Tệp sẽ gửi theo lựa chọn này: {selectedTarget?.label || 'chưa chọn người nhận'}
+            </span>
           </div>
         )}
 
@@ -77,7 +131,7 @@ const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, hasP2PConnection
             whileTap={{ scale: 0.95 }}
             type="button"
             onClick={handleFileClick}
-            disabled={!hasP2PConnection}
+            disabled={!isConnected || isSending}
             className="flex-shrink-0 w-11 h-11 rounded-xl bg-vscode-card hover:bg-vscode-hover border border-vscode-border hover:border-p2p-orange/30 text-vscode-text-secondary hover:text-p2p-orange transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             title="Đính kèm tệp"
           >
@@ -90,6 +144,41 @@ const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, hasP2PConnection
             onChange={handleFileChange}
             className="hidden"
           />
+
+          {pendingFile && selectedTarget && (
+            <div className="absolute left-0 bottom-14 z-20 w-full max-w-md rounded-lg border border-vscode-border bg-vscode-card p-3 shadow-xl">
+              <p className="text-sm font-semibold text-vscode-text">
+                {selectedTarget.group
+                  ? 'Gửi tệp này tới cả phòng?'
+                  : `Gửi tệp này tới ${selectedTarget.name}?`}
+              </p>
+              <p className="mt-1 truncate text-xs text-vscode-text-muted">
+                {pendingFile.name}
+              </p>
+              <p className="mt-2 text-xs text-vscode-text-secondary">
+                {selectedTarget.offline
+                  ? 'Người nhận đang offline. Tệp sẽ được lưu để chuyển sau.'
+                  : 'Tệp sẽ được gửi trực tiếp qua kết nối P2P.'}
+              </p>
+              <div className="mt-3 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleCancelFileSend}
+                  className="rounded-md border border-vscode-border px-3 py-1.5 text-sm text-vscode-text-secondary hover:bg-vscode-hover"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmFileSend}
+                  disabled={isSending}
+                  className="rounded-md bg-p2p-orange px-3 py-1.5 text-sm font-semibold text-vscode-dark hover:bg-p2p-yellow disabled:opacity-60"
+                >
+                  Gửi
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="flex-1 relative">
             <input
@@ -141,6 +230,12 @@ const ChatWindow = ({ onSendMessage, onFileSelect, isConnected, hasP2PConnection
             <span>•</span>
             <span>Nhấn Enter để gửi</span>
           </motion.div>
+        )}
+
+        {fileError && (
+          <div className="mt-2 text-sm text-red-300">
+            {fileError}
+          </div>
         )}
       </form>
     </div>

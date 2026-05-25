@@ -26,6 +26,10 @@ class WebRTCManager {
     this.onOfflineMessageStored = null;
     this.onOfflineMessagesDelivered = null;
     this.onOfflineMessageError = null;
+    this.onOfflineFiles = null;
+    this.onOfflineFileStored = null;
+    this.onOfflineFilesDelivered = null;
+    this.onOfflineFileError = null;
     
     // ICE servers
     this.iceServers = {
@@ -150,6 +154,31 @@ class WebRTCManager {
             console.error('❌ Offline message error:', message.message);
             if (this.onOfflineMessageError) {
               this.onOfflineMessageError(message.message);
+            }
+            break;
+
+          case 'offline-file:pending':
+            if (this.onOfflineFiles) {
+              this.onOfflineFiles(message.files || []);
+            }
+            break;
+
+          case 'offline-file:store':
+            if (this.onOfflineFileStored) {
+              this.onOfflineFileStored(message.file);
+            }
+            break;
+
+          case 'offline-file:delivered':
+            if (this.onOfflineFilesDelivered) {
+              this.onOfflineFilesDelivered(message);
+            }
+            break;
+
+          case 'offline-file:error':
+            console.error('❌ Offline file error:', message.message);
+            if (this.onOfflineFileError) {
+              this.onOfflineFileError(message.message);
             }
             break;
             
@@ -428,6 +457,11 @@ class WebRTCManager {
     return false;
   }
 
+  isDataChannelOpen(peerId) {
+    const peerData = this.peers.get(peerId);
+    return peerData?.dataChannel?.readyState === 'open';
+  }
+
   storeOfflineMessage(message) {
     return this.sendSignalingMessage({
       type: 'offline-message:store',
@@ -439,6 +473,20 @@ class WebRTCManager {
     return this.sendSignalingMessage({
       type: 'offline-message:delivered',
       messageIds
+    });
+  }
+
+  storeOfflineFile(file) {
+    return this.sendSignalingMessage({
+      type: 'offline-file:store',
+      ...file
+    });
+  }
+
+  acknowledgeOfflineFiles(fileIds) {
+    return this.sendSignalingMessage({
+      type: 'offline-file:delivered',
+      fileIds
     });
   }
 

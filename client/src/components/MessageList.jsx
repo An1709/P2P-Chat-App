@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Shield, Pin, Smile, MoreVertical, Reply, Copy, Trash2, Search, X } from 'lucide-react';
+import { Shield, Pin, Smile, MoreVertical, Reply, Copy, Trash2, Search, X, File, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import EmojiPicker from 'emoji-picker-react';
 
@@ -72,6 +72,14 @@ const MessageList = ({ messages, onPinMessage, onReactToMessage, onDeleteMessage
 
   const isPinned = (message) => {
     return pinnedMessages.some(pm => pm.id === message.id || pm.text === message.text);
+  };
+
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${Math.round((bytes / Math.pow(k, i)) * 100) / 100} ${sizes[i]}`;
   };
 
   const groupedMessages = groupMessagesByUser(filteredMessages);
@@ -171,6 +179,11 @@ const MessageList = ({ messages, onPinMessage, onReactToMessage, onDeleteMessage
                         <span>Đã lưu để gửi khi người nhận online</span>
                       </div>
                     )}
+                    {group.messages.some(msg => msg.offlineFile) && (
+                      <div className="flex items-center space-x-1 badge badge-blue">
+                        <span>Tệp ngoại tuyến</span>
+                      </div>
+                    )}
                     
                     <span className="text-xs text-vscode-text-muted">
                       {group.messages[0].timestamp}
@@ -206,15 +219,43 @@ const MessageList = ({ messages, onPinMessage, onReactToMessage, onDeleteMessage
                                 </div>
                               )}
                               
-                              <p className="text-vscode-text text-sm leading-relaxed break-words">
-                                {msg.text}
-                              </p>
+                              {msg.fileMessage ? (
+                                <div className="flex items-center gap-3">
+                                  <File size={20} className="text-vscode-accent flex-shrink-0" />
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-vscode-text text-sm font-semibold truncate">
+                                      {msg.fileName || msg.text}
+                                    </p>
+                                    {msg.fileSize && (
+                                      <p className="text-xs text-vscode-text-muted">
+                                        {formatFileSize(msg.fileSize)}
+                                      </p>
+                                    )}
+                                  </div>
+                                  {typeof msg.onDownload === 'function' && (
+                                    <button
+                                      type="button"
+                                      onClick={msg.onDownload}
+                                      className="p-2 rounded-lg bg-vscode-hover hover:bg-vscode-border text-vscode-text transition-colors"
+                                      title="Tải tệp xuống"
+                                    >
+                                      <Download size={16} />
+                                    </button>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-vscode-text text-sm leading-relaxed break-words">
+                                  {msg.text}
+                                </p>
+                              )}
 
                               {(msg.offlineDelivered || msg.offlineStored) && (
                                 <div className="mt-2 text-xs text-vscode-accent">
-                                  {msg.offlineDelivered
-                                    ? 'Tin nhắn ngoại tuyến'
-                                    : 'Tin nhắn sẽ được chuyển khi người nhận trực tuyến'}
+                                  {msg.offlineFile
+                                    ? (msg.offlineDelivered ? 'Tệp ngoại tuyến - Được chuyển khi bạn online lại' : 'Tệp sẽ được chuyển khi người nhận trực tuyến')
+                                    : (msg.offlineDelivered
+                                      ? 'Tin nhắn ngoại tuyến'
+                                      : 'Tin nhắn sẽ được chuyển khi người nhận trực tuyến')}
                                 </div>
                               )}
 

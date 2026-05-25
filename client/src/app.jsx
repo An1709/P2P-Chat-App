@@ -744,6 +744,78 @@ function App() {
         webrtcManager.onOfflineMessageError = (message) => {
           addSystemMessage(message ? `Không thể lưu tin nhắn ngoại tuyến. ${message}` : 'Không thể lưu tin nhắn ngoại tuyến.', currentRoomIdRef.current);
         };
+
+        webrtcManager.onOfflineFiles = (offlineFiles) => {
+          if (!offlineFiles.length) return;
+
+          const fileIds = [];
+          for (const offlineFile of offlineFiles) {
+            const roomId = offlineFile.roomId || currentRoomIdRef.current;
+            const senderName = offlineFile.fromDisplayName || 'Không rõ';
+            const blob = base64ToBlob(offlineFile.base64Data, offlineFile.fileType);
+
+            fileIds.push(offlineFile.id);
+            addMessageWithId(
+              offlineFile.id,
+              senderName,
+              `Tệp: ${offlineFile.fileName}`,
+              false,
+              roomId,
+              senderName,
+              offlineFile.fromUserId,
+              {
+                fileMessage: true,
+                offlineDelivered: true,
+                offlineFile: true,
+                fileName: offlineFile.fileName,
+                fileType: offlineFile.fileType,
+                fileSize: offlineFile.fileSize,
+                fileHash: offlineFile.fileHash,
+                onDownload: () => downloadBlob(blob, offlineFile.fileName)
+              }
+            );
+          }
+
+          addSystemMessage('Bạn có tệp ngoại tuyến mới.', currentRoomIdRef.current);
+          if (webrtcManager.acknowledgeOfflineFiles(fileIds)) {
+            addSystemMessage('Đã nhận tệp ngoại tuyến.', currentRoomIdRef.current);
+          }
+        };
+
+        webrtcManager.onOfflineFileStored = (offlineFile) => {
+          const targetName = offlineFile?.toDisplayName || 'peer offline';
+          addSystemMessage(`Người nhận đang offline. Tệp đã được lưu để chuyển sau: ${targetName}`, currentRoomIdRef.current);
+          if (offlineFile?.id) {
+            addMessageWithId(
+              offlineFile.id,
+              displayNameRef.current,
+              `Tệp: ${offlineFile.fileName}`,
+              false,
+              offlineFile.roomId || currentRoomIdRef.current,
+              displayNameRef.current,
+              selfIdRef.current,
+              {
+                fileMessage: true,
+                offlineStored: true,
+                offlineFile: true,
+                fileName: offlineFile.fileName,
+                fileType: offlineFile.fileType,
+                fileSize: offlineFile.fileSize,
+                fileHash: offlineFile.fileHash
+              }
+            );
+          }
+        };
+
+        webrtcManager.onOfflineFilesDelivered = (result) => {
+          if (result.deliveredCount > 0) {
+            console.log('[Offline] files marked delivered:', result.deliveredCount);
+          }
+        };
+
+        webrtcManager.onOfflineFileError = (message) => {
+          addSystemMessage(message || 'Không thể lưu tệp ngoại tuyến.', currentRoomIdRef.current);
+        };
         
         const cryptoUtils = new CryptoUtils();
         await cryptoUtils.generateKeyPair();
@@ -899,13 +971,15 @@ function App() {
         return;
       }
 
-      if (isDirect && !directMessagePeers.some(peer => peer.userId === targetPeerId)) {
+      if (isDirect) {
         const selectedRoomPeer = roomUsers.find(peer => peer.userId === targetPeerId);
         if (selectedRoomPeer?.simulated) {
           addSystemMessage('Đây là peer mô phỏng, không hỗ trợ nhắn tin trực tiếp.', currentRoomIdRef.current);
           return;
         }
+      }
 
+      if (isDirect && !directMessagePeers.some(peer => peer.userId === targetPeerId)) {
         addSystemMessage('Vui lòng chọn người nhận hợp lệ.', currentRoomIdRef.current);
         return;
       }
@@ -1014,36 +1088,187 @@ function App() {
     });
   };
 
-  const handleFileSelect = async (file) => {
-    if (fileManagersRef.current.size === 0) {
+  const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || '');
+        resolve(result.includes(',') ? result.split(',')[1] : result);
+      };
+      reader.onerror = () => reject(reader.error || new Error('Không thể đọc tệp.'));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const calculateBrowserFileHash = async (file) => {
+    const buffer = await file.arrayBuffer();
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  };
+
+  const base64ToBlob = (base64Data, fileType = 'application/octet-stream') => {
+    const binary = window.atob(base64Data || '');
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: fileType || 'application/octet-stream' });
+  };
+
+  const downloadBlob = (blob, fileName) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName || 'offline-file';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const storeOfflineDirectFile = async ({ file, targetPeerId, targetName }) => {
+    if (!webrtc || !targetPeerId || !user?.id || !selfIdRef.current) {
+      return false;
+    }
+
+    const base64Data = await fileToBase64(file);
+    const fileHash = await calculateBrowserFileHash(file);
+    return webrtc.storeOfflineFile({
+      id: `${selfIdRef.current}-file-${Date.now()}`,
+      toUserId: targetPeerId,
+      toDisplayName: targetName,
+      roomId: currentRoomIdRef.current,
+      fileName: file.name,
+      fileType: file.type || 'application/octet-stream',
+      fileSize: file.size,
+      fileHash,
+      base64Data,
+      messageType: 'direct'
+    });
+  };
+
+  const handleFileSelect = async (file, targetPeerId = 'group') => {
+    if (!webrtc) {
+      addSystemMessage('Chưa có kết nối tới máy chủ signaling.', currentRoomIdRef.current);
+      return;
+    }
+
+    if (!user?.id || !selfIdRef.current) {
+      addSystemMessage('Thiếu thông tin người dùng đã đăng nhập.', currentRoomIdRef.current);
+      return;
+    }
+
+    if (!currentRoomIdRef.current || !roomStates[currentRoomIdRef.current]) {
+      addSystemMessage('Phòng hiện tại không hợp lệ.', currentRoomIdRef.current);
+      return;
+    }
+
+    const isDirect = targetPeerId && targetPeerId !== 'group';
+
+    if (isDirect) {
+      const selectedRoomPeer = roomUsers.find(peer => peer.userId === targetPeerId);
+      const selectedDirectPeer = directMessagePeers.find(peer => peer.userId === targetPeerId);
+
+      if (selectedRoomPeer?.simulated) {
+        addSystemMessage('Đây là peer mô phỏng, không hỗ trợ gửi tệp.', currentRoomIdRef.current);
+        return;
+      }
+
+      if (!selectedDirectPeer) {
+        addSystemMessage('Vui lòng chọn người nhận trước khi gửi tệp.', currentRoomIdRef.current);
+        return;
+      }
+    } else if (peerCryptoRef.current.size === 0) {
+      addSystemMessage('Vui lòng chọn người nhận trước khi gửi tệp.', currentRoomIdRef.current);
+      return;
+    }
+
+    const targetPeerIds = isDirect ? [targetPeerId] : Array.from(peerCryptoRef.current.keys());
+    const targetName = isDirect
+      ? (
+          peerUsernamesRef.current.get(targetPeerId) ||
+          directMessagePeers.find(peer => peer.userId === targetPeerId)?.displayName ||
+          directMessagePeers.find(peer => peer.userId === targetPeerId)?.username ||
+          targetPeerId
+        )
+      : 'cả phòng';
+
+    if (!isDirect && fileManagersRef.current.size === 0) {
       addSystemMessage('Chưa có peer nào kết nối', currentRoomIdRef.current);
       return;
     }
     
-    addSystemMessage(`Đang gửi: ${file.name} (${formatFileSize(file.size)})`, currentRoomIdRef.current);
+    addSystemMessage(`Đang gửi tệp tới ${targetName}: ${file.name} (${formatFileSize(file.size)})`, currentRoomIdRef.current);
     
     try {
       let sentCount = 0;
+      let failedCount = 0;
       
-      for (const [peerId, fileManager] of fileManagersRef.current.entries()) {
+      for (const peerId of targetPeerIds) {
+        const fileManager = fileManagersRef.current.get(peerId);
         const peerCrypto = peerCryptoRef.current.get(peerId);
+        const peerName = peerUsernamesRef.current.get(peerId) || peerId;
         
-        if (peerCrypto && peerCrypto.sharedKey) {
+        if (!fileManager || !peerCrypto?.sharedKey || !webrtc.isDataChannelOpen(peerId)) {
+          if (isDirect) {
+            const stored = await storeOfflineDirectFile({ file, targetPeerId, targetName });
+            if (stored) {
+              addSystemMessage('Đang lưu tệp ngoại tuyến trên server...', currentRoomIdRef.current);
+            } else {
+              addSystemMessage('Không thể lưu tệp ngoại tuyến.', currentRoomIdRef.current);
+            }
+            return;
+          }
+
+          failedCount++;
+          addSystemMessage(`Không thể gửi tệp tới ${peerName}: peer offline hoặc chưa có khóa mã hóa.`, currentRoomIdRef.current);
+          continue;
+        }
+
+        if (fileManager && peerCrypto?.sharedKey) {
           try {
             await fileManager.sendFile(file, (progress) => {
               // Progress callback
             });
             sentCount++;
+            addSystemMessage(`Đã gửi tệp qua DataChannel tới ${peerName}: ${file.name}`, currentRoomIdRef.current);
           } catch (error) {
+            if (isDirect) {
+              const stored = await storeOfflineDirectFile({ file, targetPeerId, targetName });
+              if (stored) {
+                addSystemMessage('Đang lưu tệp ngoại tuyến trên server...', currentRoomIdRef.current);
+              } else {
+                addSystemMessage('Không thể lưu tệp ngoại tuyến.', currentRoomIdRef.current);
+              }
+              return;
+            }
+
+            failedCount++;
             console.error(`❌ Failed to send file to ${peerId}:`, error);
+            addSystemMessage(`Không thể gửi tệp tới ${peerName}: DataChannel chưa sẵn sàng.`, currentRoomIdRef.current);
           }
         }
       }
       
       if (sentCount > 0) {
-        addSystemMessage(`Đã gửi tệp tới ${sentCount} peer: ${file.name}`, currentRoomIdRef.current);
+        addSystemMessage('Tệp đã được gửi qua kết nối P2P.', currentRoomIdRef.current);
+        addSystemMessage(
+          isDirect
+            ? `Tệp đã được gửi riêng qua DataChannel tới ${targetName}: ${file.name}`
+            : `Tệp đã được gửi tới ${sentCount} peer trong phòng: ${file.name}`,
+          currentRoomIdRef.current
+        );
       } else {
-        addSystemMessage('Gửi tệp thất bại: chưa có peer sẵn sàng', currentRoomIdRef.current);
+        addSystemMessage(
+          isDirect
+            ? 'Gửi tệp thất bại: người nhận offline hoặc DataChannel chưa sẵn sàng. Store-and-forward cho tệp chưa được triển khai.'
+            : 'Gửi tệp thất bại: chưa có peer trong phòng sẵn sàng nhận qua DataChannel.',
+          currentRoomIdRef.current
+        );
+      }
+
+      if (!isDirect && failedCount > 0) {
+        addSystemMessage(`Có ${failedCount} peer không nhận được tệp do offline hoặc DataChannel chưa sẵn sàng.`, currentRoomIdRef.current);
+        addSystemMessage('Store-and-forward cho tệp ngoại tuyến hiện chỉ hỗ trợ tin nhắn tệp trực tiếp, không áp dụng cho gửi tệp cả phòng.', currentRoomIdRef.current);
       }
     } catch (error) {
       console.error('❌ Error sending file:', error);
@@ -1150,7 +1375,6 @@ function App() {
     ...knownDirectPeers
   ]
     .filter(peer => peer.userId !== selfIdRef.current)
-    .filter(peer => !peer.simulated)
     .filter((peer, index, peers) => {
       return peers.findIndex(candidate => candidate.userId === peer.userId) === index;
     });

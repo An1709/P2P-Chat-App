@@ -46,10 +46,13 @@ class FileTransferManager {
     };
 
     const encryptedMetadata = await this.crypto.encrypt(JSON.stringify(metadata));
-    this.webrtc.sendMessage(JSON.stringify({
+    const metadataSent = this.webrtc.sendMessage(JSON.stringify({
       type: 'encrypted-file-metadata',
       data: encryptedMetadata
     }));
+    if (!metadataSent) {
+      throw new Error('DataChannel chưa sẵn sàng để gửi metadata tệp.');
+    }
 
     // Send chunks
     let chunksSent = 0;
@@ -72,10 +75,13 @@ class FileTransferManager {
       const encryptedChunk = await this.crypto.encrypt(chunkMessage);
 
       // Send encrypted chunk
-      this.webrtc.sendMessage(JSON.stringify({
+      const chunkSent = this.webrtc.sendMessage(JSON.stringify({
         type: 'encrypted-file-chunk',
         data: encryptedChunk
       }));
+      if (!chunkSent) {
+        throw new Error('DataChannel bị gián đoạn khi gửi tệp.');
+      }
 
       chunksSent++;
       const progress = (chunksSent / totalChunks) * 100;

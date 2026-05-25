@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "displayName": "an",
+    "email": "tienan9999@gmail.com",
+    "passwordHash": "$2b$10$UshNQqsRdaNodiXU2UPcUuejoMZkeSVNVEKNpht6rnsfUU2q.x8oK",
+    "otpHash": "$2b$10$DmUsKGMXov.am1KGCWSG6./ONuLqcw.GV0AU2RURIhwuL22Z4pnRe",
+    "otpExpiresAt": "2026-05-25T10:08:14.399Z",
+    "createdAt": "2026-05-25T09:58:14.399Z"
+  }
+]

@@ -1,1 +1,41 @@
-[]
+[
+  {
+    "id": "94a15e6b-47eb-4676-be23-bf12ebad9126-1779634223888",
+    "fromUserId": "94a15e6b-47eb-4676-be23-bf12ebad9126",
+    "fromDisplayName": "An",
+    "toUserId": "33ab6e02-3c80-488d-8dd6-797676890992",
+    "toDisplayName": "Khoa",
+    "roomId": "general",
+    "content": "ngu",
+    "type": "direct",
+    "createdAt": "2026-05-24T14:50:23.890Z",
+    "deliveredAt": "2026-05-24T14:51:45.641Z",
+    "status": "delivered"
+  },
+  {
+    "id": "94a15e6b-47eb-4676-be23-bf12ebad9126-1779634228318",
+    "fromUserId": "94a15e6b-47eb-4676-be23-bf12ebad9126",
+    "fromDisplayName": "An",
+    "toUserId": "c175c588-d88c-41bd-bde5-fa64221523ae",
+    "toDisplayName": "Ngáo",
+    "roomId": "general",
+    "content": "ok",
+    "type": "direct",
+    "createdAt": "2026-05-24T14:50:28.321Z",
+    "deliveredAt": null,
+    "status": "pending"
+  },
+  {
+    "id": "94a15e6b-47eb-4676-be23-bf12ebad9126-1779703471757",
+    "fromUserId": "94a15e6b-47eb-4676-be23-bf12ebad9126",
+    "fromDisplayName": "An",
+    "toUserId": "33ab6e02-3c80-488d-8dd6-797676890992",
+    "toDisplayName": "Khoa",
+    "roomId": "gaming",
+    "content": "Gửi tin offline",
+    "type": "direct",
+    "createdAt": "2026-05-25T10:04:31.761Z",
+    "deliveredAt": null,
+    "status": "pending"
+  }
+]

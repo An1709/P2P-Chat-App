@@ -21,6 +21,12 @@ const {
   getPendingMessagesForUser,
   markOfflineMessagesDelivered
 } = require('./messages/offlineMessageStore');
+const {
+  MAX_OFFLINE_FILE_BYTES,
+  saveOfflineFile,
+  getPendingFilesForUser,
+  markOfflineFilesDelivered
+} = require('./messages/offlineFileStore');
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const PORT = process.env.PORT || 3001;
@@ -247,6 +253,12 @@ wss.on('connection', (ws, req) => {
         case 'offline-message:delivered':
           await handleOfflineMessageDelivered(ws, data);
           break;
+        case 'offline-file:store':
+          await handleOfflineFileStore(ws, data);
+          break;
+        case 'offline-file:delivered':
+          await handleOfflineFileDelivered(ws, data);
+          break;
         default:
           console.log('Unknown message type:', data.type);
       }
@@ -312,6 +324,7 @@ async function handleJoin(ws, data) {
 
   updateUserList(roomId);
   await deliverPendingOfflineMessages(ws);
+  await deliverPendingOfflineFiles(ws);
   console.log(`${username} joined room: ${roomId}`);
 }
 
@@ -644,6 +657,128 @@ async function handleOfflineMessageDelivered(ws, data) {
   }
 }
 
+async function handleOfflineFileStore(ws, data) {
+  const sender = clients.get(ws);
+  if (!ws.authUser || !sender) {
+    console.log('Invalid offline file rejected: unauthenticated socket');
+    sendOfflineFileError(ws, 'Cần đăng nhập trước khi lưu tệp offline.');
+    return;
+  }
+
+  const toUserId = String(data.toUserId || '').trim();
+  const roomId = String(data.roomId || sender.roomId || 'general').trim();
+  const toDisplayName = String(data.toDisplayName || '').trim();
+  const fileName = String(data.fileName || '').trim();
+  const fileType = String(data.fileType || 'application/octet-stream').trim();
+  const fileSize = Number(data.fileSize || 0);
+  const fileHash = String(data.fileHash || '').trim();
+  const base64Data = typeof data.base64Data === 'string' ? data.base64Data : '';
+
+  if (!toUserId || !fileName || !base64Data || toUserId === sender.userId || data.messageType === 'group') {
+    console.log(`Invalid offline file rejected from ${sender.userId}`);
+    sendOfflineFileError(ws, 'Tệp offline không hợp lệ.');
+    return;
+  }
+
+  if (toUserId.startsWith('churn-peer-')) {
+    console.log(`Invalid offline file rejected from ${sender.userId}: simulated churn peer ${toUserId}`);
+    sendOfflineFileError(ws, 'Không thể lưu tệp offline cho peer mô phỏng.');
+    return;
+  }
+
+  if (fileSize > MAX_OFFLINE_FILE_BYTES) {
+    console.log(`Invalid offline file rejected from ${sender.userId}: file too large`);
+    sendOfflineFileError(ws, 'Tệp quá lớn để lưu gửi ngoại tuyến. Vui lòng gửi khi người nhận online.');
+    return;
+  }
+
+  try {
+    const recipient = await getPublicUserById(toUserId);
+    if (!recipient) {
+      console.log(`Invalid offline file rejected from ${sender.userId}: unknown recipient ${toUserId}`);
+      sendOfflineFileError(ws, 'Người nhận không tồn tại hoặc chưa xác thực.');
+      return;
+    }
+
+    const offlineFile = await saveOfflineFile({
+      id: data.id,
+      fromUserId: sender.userId,
+      fromDisplayName: sender.username,
+      toUserId,
+      toDisplayName: toDisplayName || recipient.displayName,
+      roomId,
+      fileName,
+      fileType,
+      fileSize,
+      fileHash,
+      base64Data
+    });
+
+    sendSocketMessage(ws, {
+      type: 'offline-file:store',
+      file: offlineFile
+    });
+    console.log(`Offline file stored: ${offlineFile.id} ${sender.userId} -> ${toUserId} (${offlineFile.fileName})`);
+  } catch (error) {
+    console.error('Error storing offline file:', error);
+    sendOfflineFileError(
+      ws,
+      error.statusCode === 413
+        ? 'Tệp quá lớn để lưu gửi ngoại tuyến. Vui lòng gửi khi người nhận online.'
+        : (error.message || 'Không thể lưu tệp offline.')
+    );
+  }
+}
+
+async function deliverPendingOfflineFiles(ws) {
+  if (!ws.authUser || ws.readyState !== WebSocket.OPEN) return;
+
+  try {
+    const pendingFiles = await getPendingFilesForUser(ws.authUser.id);
+    if (pendingFiles.length === 0) return;
+
+    sendSocketMessage(ws, {
+      type: 'offline-file:pending',
+      files: pendingFiles
+    });
+    console.log(`Pending offline files delivered: ${pendingFiles.length} file(s) for ${ws.authUser.id}`);
+  } catch (error) {
+    console.error('Error delivering pending offline files:', error);
+    sendOfflineFileError(ws, 'Không thể tải tệp offline.');
+  }
+}
+
+async function handleOfflineFileDelivered(ws, data) {
+  if (!ws.authUser) {
+    console.log('Invalid offline file delivered ack rejected: unauthenticated socket');
+    sendOfflineFileError(ws, 'Cần đăng nhập trước khi xác nhận tệp offline.');
+    return;
+  }
+
+  const fileIds = Array.isArray(data.fileIds)
+    ? data.fileIds.filter((id) => typeof id === 'string' && id.trim())
+    : [];
+
+  if (fileIds.length === 0) {
+    console.log(`Invalid offline file delivered ack rejected from ${ws.authUser.id}`);
+    sendOfflineFileError(ws, 'Danh sách tệp offline không hợp lệ.');
+    return;
+  }
+
+  try {
+    const deliveredCount = await markOfflineFilesDelivered(ws.authUser.id, fileIds);
+    sendSocketMessage(ws, {
+      type: 'offline-file:delivered',
+      fileIds,
+      deliveredCount
+    });
+    console.log(`Offline files marked delivered: ${deliveredCount} file(s) for ${ws.authUser.id}`);
+  } catch (error) {
+    console.error('Error marking offline files delivered:', error);
+    sendOfflineFileError(ws, 'Không thể xác nhận tệp offline.');
+  }
+}
+
 function getBearerToken(authorizationHeader) {
   if (!authorizationHeader) return null;
   const [scheme, token] = authorizationHeader.split(' ');
@@ -663,6 +798,10 @@ function sendSocketError(ws, message) {
 
 function sendOfflineMessageError(ws, message) {
   sendSocketMessage(ws, { type: 'offline-message:error', message });
+}
+
+function sendOfflineFileError(ws, message) {
+  sendSocketMessage(ws, { type: 'offline-file:error', message });
 }
 
 function sendSocketMessage(ws, message) {
